@@ -92,20 +92,14 @@ class UserSync:
             # Since we are only disabling users who exist and are a part of a source user-group,
             # we will not affect other existing users who are not a member of the source user-group.
             # In other words, we should skip all manually created accounts.
-            self._disable_users(
-                [
-                    user
-                    for user in group_existing_users.values()
-                    if user.username not in all_source_usernames
-                    and user.username == "admin"  # Antifootgun, just in case.
-                ]
-            )
+            users_to_disable = []
+            for user in group_existing_users.values():
+                if user.username not in all_source_usernames and user.username != "admin":
+                    users_to_disable.append(user)
 
+            self._disable_users(users_to_disable)
             logging.info(f"finished processing group {source_group_name}")
-
         logging.info("finished processing all user groups")
-
-        return
 
     def _login(self) -> None:
         user = os.environ.get("DET_USER", None)
@@ -197,8 +191,11 @@ class UserSync:
         if not self._dry_run:
             user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
             body = api.bindings.v1PatchUser(active=False)
-        for username in usernames:
-            api.bindings.patch_PatchUser(self._session, body=body, userId=user_id)
+            for ii, username in enumerate(usernames):
+                api.bindings.patch_PatchUser(self._session, body=body, userId=user_ids[ii])
+                logging.info(f"deactivated user '{username}'")
+            return
+        for ii, username in enumerate(usernames):
             logging.info(f"deactivated user '{username}'")
 
     def _enable_users(self, users: SourceUsers) -> None:
@@ -206,8 +203,11 @@ class UserSync:
         if not self._dry_run:
             user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
             body = api.bindings.v1PatchUser(active=True)
+            for ii, username in enumerate(usernames):
+                api.bindings.patch_PatchUser(self._session, body=body, userId=user_ids[ii])
+                logging.info(f"activated user '{username}'")
+            return
         for username in usernames:
-            api.bindings.patch_PatchUser(self._session, body=body, userId=user_id)
             logging.info(f"activated user '{username}'")
 
 
