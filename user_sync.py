@@ -4,6 +4,7 @@ import argparse
 import dataclasses
 import logging
 import os
+from collections.abc import Callable
 from typing import Optional
 
 from determined import cli
@@ -17,38 +18,44 @@ from determined.experimental import client
 
 
 @dataclasses.dataclass
-class User:
+class SourceUser:
     username: str
     uid: int
     gid: int
     group_name: Optional[str] = "Unknown"
 
 
-UserList = list[User]
-UserGroups = dict[str, UserList]
+SourceUsers = list[SourceUser]
+SourceGroupsUsers = dict[str, SourceUsers]
 v1UsersMap = dict[str, api.bindings.v1User]
 v1GroupList = list[api.bindings.v1Group]
 
 
 class UserSync:
-    def __init__(self, dry_run: bool = True) -> None:
-        self._dry_run = dry_run
+    def __init__(
+        self, 
+        source_users_func: Callable[[any], SourceGroupsUsers],
+        source_users_func_args: list[any],
+        dry_run: bool = True,
+    ) -> None:
         self._session: api.Session = None
+        self._dry_run = dry_run
+        self._source_users_func = source_users_func
+        self._source_users_func_args = source_users_func_args
 
     def sync_users(self) -> None:
         self._login()
         # XXX Read through this and handle exceptions
 
-        source_users_groups: UserGroups = parse_userlist_csv("../usergrouplist.csv")
-        # XXX This needs to be a Callable that is passed in.
+        source_groups_users: SourceGroupsUsers = self._source_users_func(*self._source_users_func_args)
 
         existing_groups: list[str] = self._get_user_groups()
         all_existing_users: v1UsersMap = self._get_user_list_full()
         all_source_usernames: list[str] = [
-            user.username for users in source_users_groups.values() for user in users
+            user.username for users in source_groups_users.values() for user in users
         ]
 
-        for source_group_name, source_users in source_users_groups.items():
+        for source_group_name, source_users in source_groups_users.items():
             logging.info(f"started processing source group '{source_group_name}'")
             # Create group if it doesn't exist
             if source_group_name not in existing_groups:
@@ -57,7 +64,7 @@ class UserSync:
             group_existing_users: v1UsersMap = self._get_users_in_usergroup(
                 source_group_name
             )
-            group_users_to_add: UserList = []
+            group_users_to_add: SourceUsers = []
 
             for source_user in source_users:
                 logging.info(
@@ -149,7 +156,7 @@ class UserSync:
             logging.info(f"found user '{user.username}' in group '{group_name}'")
         return ret
 
-    def _create_user(self, user: User) -> None:
+    def _create_user(self, user: SourceUser) -> None:
         create_user = api.bindings.v1User(
             username=user.username,
             admin=False,
@@ -161,7 +168,7 @@ class UserSync:
             api.bindings.post_PostUser(self._session, body=body)
         logging.info(f"created user '{user.username}'")
 
-    def _link_with_agent_user(self, user: User) -> None:
+    def _link_with_agent_user(self, user: SourceUser) -> None:
         v1agent_user_group = api.bindings.v1AgentUserGroup(
             agentGid=user.gid,
             agentGroup=user.group_name,
@@ -176,7 +183,7 @@ class UserSync:
             f"linked user '{user.username}' with agent user {v1agent_user_group}"
         )
 
-    def _add_users_to_usergroup(self, group_name: str, users: UserList) -> None:
+    def _add_users_to_usergroup(self, group_name: str, users: SourceUsers) -> None:
         usernames = [u.username for u in users]
         if not self._dry_run:
             group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
@@ -185,7 +192,7 @@ class UserSync:
             api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
         logging.info(f"added users to group '{group_name}', user list: {usernames}")
 
-    def _disable_users(self, users: UserList) -> None:
+    def _disable_users(self, users: SourceUsers) -> None:
         usernames = [u.username for u in users]
         if not self._dry_run:
             user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
@@ -194,7 +201,7 @@ class UserSync:
             api.bindings.patch_PatchUser(self._session, body=body, userId=user_id)
             logging.info(f"deactivated user '{username}'")
 
-    def _enable_users(self, users: UserList) -> None:
+    def _enable_users(self, users: SourceUsers) -> None:
         usernames = [u.username for u in users]
         if not self._dry_run:
             user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
@@ -204,15 +211,12 @@ class UserSync:
             logging.info(f"activated user '{username}'")
 
 
-# XXX maybe use a factory
-# XXX UserGroups sucks as a name
-#   XXX This is really a "Source Users Groups factory"
-def parse_userlist_csv(filepath: str) -> UserGroups:
-    # XXX probably don't need error handling right now as this might get replaced.
+def parse_userlist_csv(filepath: str) -> SourceGroupsUsers:
+    # XXX Example function
     expected_headers = ["groupname", "username", "uid", "gid"]
     delim = ","
 
-    user_groups = UserGroups()
+    user_groups = SourceGroupsUsers()
 
     with open(filepath, "r") as f:
         for ii, line in enumerate(f.readlines()):
@@ -231,9 +235,9 @@ def parse_userlist_csv(filepath: str) -> UserGroups:
             group_name = fields[headers.index("groupname")]
 
             if group_name not in user_groups:
-                user_groups[group_name] = UserList()
+                user_groups[group_name] = SourceUsers()
 
-            user = User(
+            user = SourceUser(
                 fields[headers.index("username")],
                 int(fields[headers.index("uid")]),
                 int(fields[headers.index("gid")]),
@@ -260,6 +264,6 @@ if __name__ == "__main__":
     dry_run = not args.apply
 
     configure_logging(dry_run)
-    user_sync = UserSync(dry_run)
+    user_sync = UserSync(parse_userlist_csv, ["../usergrouplist.csv"], dry_run)
 
     user_sync.sync_users()
