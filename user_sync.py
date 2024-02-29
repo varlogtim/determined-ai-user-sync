@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # XXX Need python >3.9
+import argparse
 import dataclasses
 import logging
 import os
@@ -14,10 +15,6 @@ from determined.experimental import client
 # XXX Potentially need a disable user limit?
 # XXX need to implement --dry-run=false
 
-logging.basicConfig(
-    format="%(asctime)s: %(levelname)s: %(message)s", level=logging.INFO
-)
-
 
 @dataclasses.dataclass
 class User:
@@ -25,7 +22,6 @@ class User:
     uid: int
     gid: int
     group_name: Optional[str] = "Unknown"
-    display_name: Optional[str] = None  # XXX impl
 
 
 UserList = list[User]
@@ -35,14 +31,15 @@ v1GroupList = list[api.bindings.v1Group]
 
 
 class UserSync:
-    def __init__(self, session: api.Session) -> None:
-        self._session = session
+    def __init__(self, dry_run: bool = True) -> None:
+        self._dry_run = dry_run
+        self._session: api.Session = None
 
     def sync_users(self) -> None:
+        self._login()
         # XXX Read through this and handle exceptions
-        # XXX Read through this and refactor functions signatures
 
-        source_users_groups: UserGroups = parse_userlist_csv("./usergrouplist.csv")
+        source_users_groups: UserGroups = parse_userlist_csv("../usergrouplist.csv")
         # XXX This needs to be a Callable that is passed in.
 
         existing_groups: list[str] = self._get_user_groups()
@@ -52,6 +49,7 @@ class UserSync:
         ]
 
         for source_group_name, source_users in source_users_groups.items():
+            logging.info(f"started processing source group '{source_group_name}'")
             # Create group if it doesn't exist
             if source_group_name not in existing_groups:
                 self._create_usergroup(source_group_name)
@@ -62,6 +60,9 @@ class UserSync:
             group_users_to_add: UserList = []
 
             for source_user in source_users:
+                logging.info(
+                    f"started processing of source user {source_user} in group '{source_group_name}'"
+                )
                 # Create user if not exists
                 if source_user.username not in all_existing_users:
                     self._create_user(source_user)
@@ -99,15 +100,29 @@ class UserSync:
 
         return
 
+    def _login(self) -> None:
+        user = os.environ.get("DET_USER", None)
+        password = os.environ.get("DET_PASSWORD", None)
+        master = os.environ.get("DET_MASTER", None)
+        if user is None or password is None:
+            raise ValueError(
+                "You must set DET_MASTER, DET_USER and DET_PASSWORD before executing this script"
+            )
+        client.login(master, user, password)
+        self._session = client._determined._session
+
+
     def _get_user_groups(self) -> list[str]:
         # XXX raises determined.common.api.errors.BadRequestException if group does not exist
         # XXX Need to handle condition in which response is equal to limit, i.e., is incomplete.
         limit = 500
         body = api.bindings.v1GetGroupsRequest(limit=limit, offset=None, userId=None)
+        if self._dry_run:
+            return []
         resp = api.bindings.post_GetGroups(self._session, body=body)
         for group_res in resp.groups:
             logging.info(
-                f"found existing user-group search result: {group_res.group.name} "
+                f"found existing user-group '{group_res.group.name}' "
                 f"with {group_res.numMembers} members"
             )
         return [group.group.name for group in resp.groups]
@@ -118,16 +133,17 @@ class UserSync:
 
     def _create_usergroup(self, group_name: str) -> None:
         body = api.bindings.v1CreateGroupRequest(name=group_name, addUsers=None)
-        api.bindings.post_CreateGroup(self._session, body=body)
+        if not self._dry_run:
+            api.bindings.post_CreateGroup(self._session, body=body)
         logging.info(f"created user-group '{group_name}'")
-        # XXX Need to get the user id from this?
 
     def _get_users_in_usergroup(self, group_name: str) -> v1UsersMap:
-        group_id = cli.user_groups.group_name_to_group_id(session, group_name)
-        resp = api.bindings.get_GetGroup(self._session, groupId=group_id)
-        logging.info(f"retrieved user-group: {resp.group}")
-        # XXX I think there is a num_members attribute here that might be worth logging
         ret = {}
+        if self._dry_run:
+            return ret
+        group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
+        resp = api.bindings.get_GetGroup(self._session, groupId=group_id)
+        logging.info(f"retrieved user-group details: {resp.group}")
         for user in resp.group.users:
             ret[user.username] = user
             logging.info(f"found user '{user.username}' in group '{group_name}'")
@@ -136,16 +152,14 @@ class UserSync:
     def _create_user(self, user: User) -> None:
         create_user = api.bindings.v1User(
             username=user.username,
-            display_name=user.display_name,
             admin=False,
             active=True,
             remote=True,
         )
         body = api.bindings.v1PostUserRequest(user=create_user)
-        api.bindings.post_PostUser(self._session, body=body)
-        logging.info(
-            f"created user '{user.username}' with display name '{user.display_name}'"
-        )
+        if not self._dry_run:
+            api.bindings.post_PostUser(self._session, body=body)
+        logging.info(f"created user '{user.username}'")
 
     def _link_with_agent_user(self, user: User) -> None:
         v1agent_user_group = api.bindings.v1AgentUserGroup(
@@ -154,37 +168,40 @@ class UserSync:
             agentUid=user.uid,
             agentUser=user.username,
         )
-        body = api.bindings.v1PatchUser(agentUserGroup=v1agent_user_group)
-        user_ids = cli.user_groups.usernames_to_user_ids(self._session, [user.username])
-        api.bindings.patch_PatchUser(self._session, body=body, userId=user_ids[0])
+        if not self._dry_run:
+            body = api.bindings.v1PatchUser(agentUserGroup=v1agent_user_group)
+            user_ids = cli.user_groups.usernames_to_user_ids(self._session, [user.username])
+            api.bindings.patch_PatchUser(self._session, body=body, userId=user_ids[0])
         logging.info(
             f"linked user '{user.username}' with agent user {v1agent_user_group}"
         )
 
     def _add_users_to_usergroup(self, group_name: str, users: UserList) -> None:
         usernames = [u.username for u in users]
-        group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
-        user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
-
-        body = api.bindings.v1UpdateGroupRequest(groupId=group_id, addUsers=user_ids)
-        api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
+        if not self._dry_run:
+            group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
+            user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
+            body = api.bindings.v1UpdateGroupRequest(groupId=group_id, addUsers=user_ids)
+            api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
         logging.info(f"added users to group '{group_name}', user list: {usernames}")
 
     def _disable_users(self, users: UserList) -> None:
         usernames = [u.username for u in users]
-        user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
-        body = api.bindings.v1PatchUser(active=False)
-        for ii, user_id in enumerate(user_ids):
+        if not self._dry_run:
+            user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
+            body = api.bindings.v1PatchUser(active=False)
+        for username in usernames:
             api.bindings.patch_PatchUser(self._session, body=body, userId=user_id)
-            logging.info(f"deactivated user '{usernames[ii]}' with uid {user_id}")
+            logging.info(f"deactivated user '{username}'")
 
     def _enable_users(self, users: UserList) -> None:
         usernames = [u.username for u in users]
-        user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
-        body = api.bindings.v1PatchUser(active=True)
-        for ii, user_id in enumerate(user_ids):
+        if not self._dry_run:
+            user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
+            body = api.bindings.v1PatchUser(active=True)
+        for username in usernames:
             api.bindings.patch_PatchUser(self._session, body=body, userId=user_id)
-            logging.info(f"activated user '{usernames[ii]}' with uid {user_id}")
+            logging.info(f"activated user '{username}'")
 
 
 # XXX maybe use a factory
@@ -227,18 +244,22 @@ def parse_userlist_csv(filepath: str) -> UserGroups:
 
     return user_groups
 
+def configure_logging(dry_run: bool = True) -> None:
+    logging_format="%(asctime)s: %(levelname)s: %(message)s"
+    if dry_run:
+        logging_format="%(asctime)s: DRYRUN: %(levelname)s: %(message)s"
+
+    logging.basicConfig(format=logging_format, level=logging.INFO)
 
 if __name__ == "__main__":
-    user = os.environ.get("DET_USER", None)
-    password = os.environ.get("DET_PASSWORD", None)
-    master = os.environ.get("DET_MASTER", None)
-    if user is None or password is None:
-        raise ValueError(
-            "You must set DET_MASTER, DET_USER and DET_PASSWORD before executing this script"
-        )
 
-    client.login(master, user, password)
-    session = client._determined._session
-    user_sync = UserSync(session)
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument("--apply", action="store_true", help="actually apply the changes")
+    args = arg_parser.parse_args()
+
+    dry_run = not args.apply
+
+    configure_logging(dry_run)
+    user_sync = UserSync(dry_run)
 
     user_sync.sync_users()
