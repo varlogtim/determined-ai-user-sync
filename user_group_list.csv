@@ -1,0 +1,6 @@
+groupname,username,uid,gid,unix_username,unix_groupname
+groupA,abowen,100,100,abowen,developers
+groupA,cdavis,102,102,cdavis,developers
+groupA,efeynman,103,103,efeynman,admins
+groupB,gharris,103,103,gharris,admins
+groupB,ijoplin,104,104,ijoplin,developers

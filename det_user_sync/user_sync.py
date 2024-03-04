@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 # XXX Need python >3.9
-import argparse
-import dataclasses
 import logging
 import os
 from collections.abc import Callable
@@ -10,44 +8,31 @@ from typing import Optional
 from determined import cli
 from determined.common import api
 from determined.experimental import client
+from .types import SourceUser, SourceUsers, SourceGroups, v1UsersMap, v1GroupList
 
 # XXX There is a question of where the user-groups we should
 # XXX Not doing a report
 # XXX Potentially need a disable user limit?
-# XXX need to implement --dry-run=false
 
-
-@dataclasses.dataclass
-class SourceUser:
-    username: str
-    uid: int
-    gid: int
-    group_name: Optional[str] = "Unknown"
-
-
-SourceUsers = list[SourceUser]
-SourceGroupsUsers = dict[str, SourceUsers]
-v1UsersMap = dict[str, api.bindings.v1User]
-v1GroupList = list[api.bindings.v1Group]
 
 
 class UserSync:
     def __init__(
         self, 
-        source_users_func: Callable[[any], SourceGroupsUsers],
-        source_users_func_args: list[any],
+        source_groups_func: Callable[[any], SourceGroups],
+        source_groups_func_args: list[any],
         dry_run: bool = True,
     ) -> None:
         self._session: api.Session = None
         self._dry_run = dry_run
-        self._source_users_func = source_users_func
-        self._source_users_func_args = source_users_func_args
+        self._source_groups_func = source_groups_func
+        self._source_groups_func_args = source_groups_func_args
 
     def sync_users(self) -> None:
         self._login()
         # XXX Read through this and handle exceptions
 
-        source_groups_users: SourceGroupsUsers = self._source_users_func(*self._source_users_func_args)
+        source_groups_users: SourceGroups = self._source_groups_func(*self._source_groups_func_args)
 
         existing_groups: list[str] = self._get_user_groups()
         all_existing_users: v1UsersMap = self._get_user_list_full()
@@ -209,61 +194,3 @@ class UserSync:
             return
         for username in usernames:
             logging.info(f"activated user '{username}'")
-
-
-def parse_userlist_csv(filepath: str) -> SourceGroupsUsers:
-    # XXX Example function
-    expected_headers = ["groupname", "username", "uid", "gid"]
-    delim = ","
-
-    user_groups = SourceGroupsUsers()
-
-    with open(filepath, "r") as f:
-        for ii, line in enumerate(f.readlines()):
-            line = line.rstrip()
-            fields = line.split(delim)
-            if ii == 0:
-                for exp_head in expected_headers:
-                    # XXX Doesn't handle duplicate header entries
-                    if exp_head not in exp_head:
-                        raise ValueError(
-                            f"Could not find expected header '{exp_head}' in {fields}"
-                        )
-                headers = fields
-                continue
-
-            group_name = fields[headers.index("groupname")]
-
-            if group_name not in user_groups:
-                user_groups[group_name] = SourceUsers()
-
-            user = SourceUser(
-                fields[headers.index("username")],
-                int(fields[headers.index("uid")]),
-                int(fields[headers.index("gid")]),
-            )
-
-            logging.debug(f"parsed group '{group_name}' with user: {user}")
-            user_groups[group_name].append(user)
-
-    return user_groups
-
-def configure_logging(dry_run: bool = True) -> None:
-    logging_format="%(asctime)s: %(levelname)s: %(message)s"
-    if dry_run:
-        logging_format="%(asctime)s: DRYRUN: %(levelname)s: %(message)s"
-
-    logging.basicConfig(format=logging_format, level=logging.INFO)
-
-if __name__ == "__main__":
-
-    arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument("--apply", action="store_true", help="actually apply the changes")
-    args = arg_parser.parse_args()
-
-    dry_run = not args.apply
-
-    configure_logging(dry_run)
-    user_sync = UserSync(parse_userlist_csv, ["../usergrouplist.csv"], dry_run)
-
-    user_sync.sync_users()
