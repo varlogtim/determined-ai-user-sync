@@ -1,10 +1,10 @@
 import csv
 
-from det_user_sync import SourceUser, SourceUsers, SourceGroups
+from det_user_sync import SourceGroups, SourceUser, SourceUsers
 
 
 def parse_userlist_csv(filepath: str) -> SourceGroups:
-    required_fields = ["groupname", "username", "uid", "gid"]
+    required_fields = ["groupname", "username", "uid", "gid", "unix_username", "unix_groupname"]
     groups = SourceGroups()
 
     with open(filepath, "r") as csvfile:
@@ -21,7 +21,9 @@ def parse_userlist_csv(filepath: str) -> SourceGroups:
             user = SourceUser(
                 username=row["username"],
                 uid=int(row["uid"]),
-                gid=int(row["gid"])
+                gid=int(row["gid"]),
+                unix_username=row["unix_username"],
+                unix_groupname=row["unix_groupname"],
             )
 
             groups[row["groupname"]].append(user)

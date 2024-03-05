@@ -1,2 +1,2 @@
-from .types import SourceUser, SourceUsers, SourceGroups
+from .types import SourceGroups, SourceUser, SourceUsers
 from .user_sync import UserSync
