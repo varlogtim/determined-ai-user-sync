@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# XXX Need python >3.9
 import logging
 import os
 from collections.abc import Callable
@@ -11,9 +10,6 @@ from determined.experimental import client
 
 from .types import (SourceGroups, SourceUser, SourceUsers, v1GroupList,
                     v1UsersMap)
-
-# XXX Not doing a report
-# XXX Potentially need a disable user limit?
 
 
 class UserSync:
@@ -29,6 +25,7 @@ class UserSync:
         self._source_groups_func_args = source_groups_func_args
 
     def sync_users(self) -> None:
+        # Make sure we have an active session
         if self._session is None:
             self._login()
 
@@ -38,18 +35,25 @@ class UserSync:
             logging.info(f"session expired")
             self._login()
 
+        # Get source groups and users
         logging.info("starting call to source groups func")
         # TODO: see if we can async and timeout call this function
-        source_groups_users: SourceGroups = self._source_groups_func(
-            *self._source_groups_func_args
-        )
+        try:
+            source_groups_users: SourceGroups = self._source_groups_func(
+                *self._source_groups_func_args
+            )
+        except Exception as e:
+            logging.error(f"unable to fetch source groups, exception: {e}")
+            return
+
         logging.info("ended call to source groups func")
 
+        # Get existing groups and users
         try:
             existing_groups: list[str] = self._get_user_groups()
             all_existing_users: v1UsersMap = self._get_user_list_full()
         except Exception as e:
-            logging.error("unable to get user list, exception {e}")
+            logging.error(f"unable to get user list, exception {e}")
             return
 
         all_source_usernames: list[str] = [
@@ -63,7 +67,9 @@ class UserSync:
                 try:
                     self._create_usergroup(source_group_name)
                 except Exception as e:
-                    logging.error(f"unable to create group '{source_group_name}', exception: {e}")
+                    logging.error(
+                        f"unable to create group '{source_group_name}', exception: {e}"
+                    )
                     logging.info(f"skipping source group '{source_group_name}'")
                     continue
 
@@ -72,7 +78,9 @@ class UserSync:
                     source_group_name
                 )
             except Exception as e:
-                logging.error(f"unable to get group members '{source_group_name}', exception: {e}")
+                logging.error(
+                    f"unable to get group members '{source_group_name}', exception: {e}"
+                )
                 logging.info(f"skipping source group '{source_group_name}'")
                 continue
 
@@ -87,7 +95,9 @@ class UserSync:
                     try:
                         self._create_user(source_user)
                     except Exception as e:
-                        logging.error(f"unable to create user '{source_user.username}', exception: {e}")
+                        logging.error(
+                            f"unable to create user '{source_user.username}', exception: {e}"
+                        )
                         logging.info(f"skipping source user '{source_user.username}'")
                         continue
                 else:
@@ -107,7 +117,9 @@ class UserSync:
                 try:
                     self._link_with_agent_user(source_user)
                 except Exception as e:
-                    logging.error(f"unable to link with agent user '{source_user.username}', exception: {e}")
+                    logging.error(
+                        f"unable to link with agent user '{source_user.username}', exception: {e}"
+                    )
 
             # Add users to group
             try:
@@ -140,9 +152,9 @@ class UserSync:
                 )
 
             # XXX think about creating exceptions that break out of the loop and log differently here.
+            # I.e., make it clear we processed a group but with errors.
             logging.info(f"finished processing group {source_group_name}")
         logging.info("finished processing all user groups")
-
 
     def _whoami(self) -> None:
         resp = api.bindings.get_GetMe(self._session)

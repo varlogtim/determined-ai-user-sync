@@ -7,11 +7,8 @@ from typing import Callable, Optional
 
 from det_user_sync import SourceGroups, SourceUser, UserSync
 
-# XXX TODO:
-# - Make usage.
-# - Handle exceptions
 
-seconds_in_minute = 10
+seconds_in_minute = 60
 
 
 def err(msg: str):
@@ -61,7 +58,10 @@ if __name__ == "__main__":
         "--apply", default=False, action="store_true", help="actually apply the changes"
     )
     arg_parser.add_argument(
-        "--period-mins", type=int, default=0, help="execution period in minutes, defaults to single run"
+        "--period-mins",
+        type=int,
+        default=0,
+        help="execution period in minutes, defaults to single run",
     )
     arg_parser.add_argument(
         "--source-func",
@@ -98,4 +98,3 @@ if __name__ == "__main__":
     print(f"args.period_mins: {args.period_mins}")
 
     run(func, args.func_args, dry_run, args.period_mins)
-
