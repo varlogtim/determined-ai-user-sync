@@ -8,17 +8,17 @@ from typing import Optional
 from determined import cli
 from determined.common import api
 from determined.experimental import client
-from .types import SourceUser, SourceUsers, SourceGroups, v1UsersMap, v1GroupList
 
-# XXX There is a question of where the user-groups we should
+from .types import (SourceGroups, SourceUser, SourceUsers, v1GroupList,
+                    v1UsersMap)
+
 # XXX Not doing a report
 # XXX Potentially need a disable user limit?
 
 
-
 class UserSync:
     def __init__(
-        self, 
+        self,
         source_groups_func: Callable[[any], SourceGroups],
         source_groups_func_args: list[any],
         dry_run: bool = True,
@@ -29,13 +29,29 @@ class UserSync:
         self._source_groups_func_args = source_groups_func_args
 
     def sync_users(self) -> None:
-        self._login()
-        # XXX Read through this and handle exceptions
+        if self._session is None:
+            self._login()
 
-        source_groups_users: SourceGroups = self._source_groups_func(*self._source_groups_func_args)
+        try:
+            self._whoami()
+        except api.errors.UnauthenticatedException:
+            logging.info(f"session expired")
+            self._login()
 
-        existing_groups: list[str] = self._get_user_groups()
-        all_existing_users: v1UsersMap = self._get_user_list_full()
+        logging.info("starting call to source groups func")
+        # TODO: see if we can async and timeout call this function
+        source_groups_users: SourceGroups = self._source_groups_func(
+            *self._source_groups_func_args
+        )
+        logging.info("ended call to source groups func")
+
+        try:
+            existing_groups: list[str] = self._get_user_groups()
+            all_existing_users: v1UsersMap = self._get_user_list_full()
+        except Exception as e:
+            logging.error("unable to get user list, exception {e}")
+            return
+
         all_source_usernames: list[str] = [
             user.username for users in source_groups_users.values() for user in users
         ]
@@ -44,11 +60,22 @@ class UserSync:
             logging.info(f"started processing source group '{source_group_name}'")
             # Create group if it doesn't exist
             if source_group_name not in existing_groups:
-                self._create_usergroup(source_group_name)
+                try:
+                    self._create_usergroup(source_group_name)
+                except Exception as e:
+                    logging.error(f"unable to create group '{source_group_name}', exception: {e}")
+                    logging.info(f"skipping source group '{source_group_name}'")
+                    continue
 
-            group_existing_users: v1UsersMap = self._get_users_in_usergroup(
-                source_group_name
-            )
+            try:
+                group_existing_users: v1UsersMap = self._get_users_in_usergroup(
+                    source_group_name
+                )
+            except Exception as e:
+                logging.error(f"unable to get group members '{source_group_name}', exception: {e}")
+                logging.info(f"skipping source group '{source_group_name}'")
+                continue
+
             group_users_to_add: SourceUsers = []
 
             for source_user in source_users:
@@ -57,20 +84,39 @@ class UserSync:
                 )
                 # Create user if not exists
                 if source_user.username not in all_existing_users:
-                    self._create_user(source_user)
+                    try:
+                        self._create_user(source_user)
+                    except Exception as e:
+                        logging.error(f"unable to create user '{source_user.username}', exception: {e}")
+                        logging.info(f"skipping source user '{source_user.username}'")
+                        continue
                 else:
                     # Enable user if user exists but is disabled
                     if not all_existing_users[source_user.username].active:
-                        self._enable_users([source_user])
+                        try:
+                            self._enable_users([source_user])
+                        except Exception as e:
+                            logging.error(
+                                f"unable to enable disabled user '{source_user.username}', exception: {e}"
+                            )
 
                 if source_user.username not in group_existing_users:
                     group_users_to_add.append(source_user)
 
                 # Link with agent user
-                self._link_with_agent_user(source_user)
+                try:
+                    self._link_with_agent_user(source_user)
+                except Exception as e:
+                    logging.error(f"unable to link with agent user '{source_user.username}', exception: {e}")
 
             # Add users to group
-            self._add_users_to_usergroup(source_group_name, group_users_to_add)
+            try:
+                self._add_users_to_usergroup(source_group_name, group_users_to_add)
+            except Exception as e:
+                logging.error(
+                    f"unable to add users to user-group '{source_group_name}', "
+                    f"userlist: {group_users_to_add}, exception: {e}"
+                )
 
             # Disable users existing in this user-group that are not present in the full source
             # users list. This condition checks that they are not apart of any other user-group.
@@ -79,12 +125,28 @@ class UserSync:
             # In other words, we should skip all manually created accounts.
             users_to_disable = []
             for user in group_existing_users.values():
-                if user.username not in all_source_usernames and user.username != "admin":
+                if (
+                    user.username not in all_source_usernames
+                    and user.username != "admin"
+                ):
                     users_to_disable.append(user)
 
-            self._disable_users(users_to_disable)
+            try:
+                self._disable_users(users_to_disable)
+            except Exception as e:
+                logging.error(
+                    f"unable to disable users in user-group '{source_group_name}', "
+                    f"userlist: {users_to_disable}, exception: {e}"
+                )
+
+            # XXX think about creating exceptions that break out of the loop and log differently here.
             logging.info(f"finished processing group {source_group_name}")
         logging.info("finished processing all user groups")
+
+
+    def _whoami(self) -> None:
+        resp = api.bindings.get_GetMe(self._session)
+        return resp.user
 
     def _login(self) -> None:
         user = os.environ.get("DET_USER", None)
@@ -94,9 +156,9 @@ class UserSync:
             raise ValueError(
                 "You must set DET_MASTER, DET_USER and DET_PASSWORD before executing this script"
             )
-        client.login(master, user, password)
-        self._session = client._determined._session
-
+        det = client.Determined(master, user, password)
+        logging.info(f"logged in as user '{user}' to {master}")
+        self._session = det._session
 
     def _get_user_groups(self) -> list[str]:
         # XXX raises determined.common.api.errors.BadRequestException if group does not exist
@@ -150,13 +212,15 @@ class UserSync:
     def _link_with_agent_user(self, user: SourceUser) -> None:
         v1agent_user_group = api.bindings.v1AgentUserGroup(
             agentGid=user.gid,
-            agentGroup=user.group_name,
+            agentGroup=user.unix_groupname,
             agentUid=user.uid,
-            agentUser=user.username,
+            agentUser=user.unix_username,
         )
         if not self._dry_run:
             body = api.bindings.v1PatchUser(agentUserGroup=v1agent_user_group)
-            user_ids = cli.user_groups.usernames_to_user_ids(self._session, [user.username])
+            user_ids = cli.user_groups.usernames_to_user_ids(
+                self._session, [user.username]
+            )
             api.bindings.patch_PatchUser(self._session, body=body, userId=user_ids[0])
         logging.info(
             f"linked user '{user.username}' with agent user {v1agent_user_group}"
@@ -167,7 +231,9 @@ class UserSync:
         if not self._dry_run:
             group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
             user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
-            body = api.bindings.v1UpdateGroupRequest(groupId=group_id, addUsers=user_ids)
+            body = api.bindings.v1UpdateGroupRequest(
+                groupId=group_id, addUsers=user_ids
+            )
             api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
         logging.info(f"added users to group '{group_name}', user list: {usernames}")
 
@@ -177,7 +243,9 @@ class UserSync:
             user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
             body = api.bindings.v1PatchUser(active=False)
             for ii, username in enumerate(usernames):
-                api.bindings.patch_PatchUser(self._session, body=body, userId=user_ids[ii])
+                api.bindings.patch_PatchUser(
+                    self._session, body=body, userId=user_ids[ii]
+                )
                 logging.info(f"deactivated user '{username}'")
             return
         for ii, username in enumerate(usernames):
@@ -189,7 +257,9 @@ class UserSync:
             user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
             body = api.bindings.v1PatchUser(active=True)
             for ii, username in enumerate(usernames):
-                api.bindings.patch_PatchUser(self._session, body=body, userId=user_ids[ii])
+                api.bindings.patch_PatchUser(
+                    self._session, body=body, userId=user_ids[ii]
+                )
                 logging.info(f"activated user '{username}'")
             return
         for username in usernames:
