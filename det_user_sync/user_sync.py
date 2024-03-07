@@ -101,7 +101,7 @@ class UserSync:
                 if source_user.username not in all_existing_users:
                     try:
                         self._create_user(source_user)
-                        all_existing_users[source_user.username] = source_user
+                        # all_existing_users[source_user.username] = source_user  # FIXME: please
                     except Exception as e:
                         logging.error(
                             f"unable to create user '{source_user.username}', exception: {e}"
