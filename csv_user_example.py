@@ -11,6 +11,7 @@ def parse_userlist_csv(filepath: str) -> SourceGroups:
         "gid",
         "unix_username",
         "unix_groupname",
+        "display_name",
     ]
     groups = SourceGroups()
 
@@ -31,6 +32,8 @@ def parse_userlist_csv(filepath: str) -> SourceGroups:
                 gid=int(row["gid"]),
                 unix_username=row["unix_username"],
                 unix_groupname=row["unix_groupname"],
+                display_name=row["display_name"],
+                password=row["password"]
             )
 
             groups[row["groupname"]].append(user)

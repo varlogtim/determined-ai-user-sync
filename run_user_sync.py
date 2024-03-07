@@ -95,6 +95,4 @@ if __name__ == "__main__":
     dry_run = not args.apply
     configure_logging(dry_run)
 
-    print(f"args.period_mins: {args.period_mins}")
-
     run(func, args.func_args, dry_run, args.period_mins)
