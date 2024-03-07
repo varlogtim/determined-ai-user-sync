@@ -1,6 +1,8 @@
 import dataclasses
+from typing import Optional
 
 from determined.common import api
+
 
 
 @dataclasses.dataclass
@@ -10,7 +12,8 @@ class SourceUser:
     gid: int
     unix_username: str
     unix_groupname: str
-    # TODO impl Display name
+    display_name: str
+    password: Optional[str] = None
 
 
 SourceUsers = list[SourceUser]

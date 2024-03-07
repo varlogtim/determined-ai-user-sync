@@ -1,6 +1,6 @@
-groupname,username,uid,gid,unix_username,unix_groupname
-groupA,abowen,100,100,abowen,developers
-groupA,cdavis,102,102,cdavis,developers
-groupA,efeynman,103,103,efeynman,admins
-groupB,gharris,103,103,gharris,admins
-groupB,ijoplin,104,104,ijoplin,developers
+groupname,username,uid,gid,unix_username,unix_groupname,display_name,password
+admins,abowen,100,100,abowen,developers,Andrew Bowen,super_secret
+groupA,cdavis,102,102,cdavis,developers,Carl Davis
+groupA,efeynman,103,103,efeynman,admins,Eric Feynman
+groupB,gharris,103,103,gharris,admins,Greg Harris
+groupB,ijoplin,104,104,ijoplin,developers,Ingrid Joplin

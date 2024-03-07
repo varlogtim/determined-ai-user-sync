@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import logging
 import os
+import traceback
 from collections.abc import Callable
 from typing import Optional
 
@@ -16,7 +17,7 @@ class UserSync:
     def __init__(
         self,
         source_groups_func: Callable[[any], SourceGroups],
-        source_groups_func_args: list[any],
+        source_groups_func_args: Optional[list[any]],
         dry_run: bool = True,
     ) -> None:
         self._session: api.Session = None
@@ -39,11 +40,16 @@ class UserSync:
         logging.info("starting call to source groups func")
         # TODO: see if we can async and timeout call this function
         try:
-            source_groups_users: SourceGroups = self._source_groups_func(
-                *self._source_groups_func_args
-            )
+            if isinstance(self._source_groups_func_args, list):
+                source_groups_users = self._source_groups_func(
+                    *self._source_groups_func_args
+                )
+            else:
+                source_groups_users = self._source_groups_func()
         except Exception as e:
-            logging.error(f"unable to fetch source groups, exception: {e}")
+            exc_str = "".join(traceback.format_tb(e.__traceback__))
+            logging.error(
+                f"unable to fetch source groups, exception: \n{exc_str}{e}")
             return
 
         logging.info("ended call to source groups func")
@@ -90,10 +96,12 @@ class UserSync:
                 logging.info(
                     f"started processing of source user {source_user} in group '{source_group_name}'"
                 )
+                # XXX create a __str__ method for source_user which masks the password
                 # Create user if not exists
                 if source_user.username not in all_existing_users:
                     try:
                         self._create_user(source_user)
+                        all_existing_users[source_user.username] = source_user
                     except Exception as e:
                         logging.error(
                             f"unable to create user '{source_user.username}', exception: {e}"
@@ -210,16 +218,23 @@ class UserSync:
         return ret
 
     def _create_user(self, user: SourceUser) -> None:
+        remote = True
+        hashed_password = None
+        if user.password is not None and user.password != "":
+            hashed_password = api.salt_and_hash(user.password)
+            remote = False
+
         create_user = api.bindings.v1User(
             username=user.username,
             admin=False,
             active=True,
-            remote=True,
+            remote=remote,
+            displayName=user.display_name,
         )
-        body = api.bindings.v1PostUserRequest(user=create_user)
+        body = api.bindings.v1PostUserRequest(user=create_user, password=hashed_password, isHashed=True)
         if not self._dry_run:
             api.bindings.post_PostUser(self._session, body=body)
-        logging.info(f"created user '{user.username}'")
+        logging.info(f"created user '{user.username}': {create_user}")
 
     def _link_with_agent_user(self, user: SourceUser) -> None:
         v1agent_user_group = api.bindings.v1AgentUserGroup(
