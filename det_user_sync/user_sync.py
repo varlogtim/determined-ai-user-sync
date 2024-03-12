@@ -217,7 +217,7 @@ class UserSync:
             logging.info(f"found user '{user.username}' in group '{group_name}'")
         return ret
 
-    def _create_user(self, user: SourceUser) -> v1User:
+    def _create_user(self, user: SourceUser) -> api.bindings.v1User:
         remote = True
         hashed_password = None
         if user.password is not None and user.password != "":
