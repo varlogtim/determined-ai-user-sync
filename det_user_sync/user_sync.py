@@ -52,6 +52,8 @@ class UserSync:
                 f"unable to fetch source groups, exception: \n{exc_str}{e}")
             return
 
+        total_users = sum([len(u) for u in source_groups_users.values()])
+        logging.info(f"found {len(source_groups_users)} groups with total users: {total_users}")
         logging.info("ended call to source groups func")
 
         # Get existing groups and users
@@ -101,7 +103,9 @@ class UserSync:
                 if source_user.username not in all_existing_users:
                     try:
                         user = self._create_user(source_user)
-                        all_existing_users[source_user.username] = user
+                        # Happens if dry run
+                        if user is not None:
+                            all_existing_users[source_user.username] = user
                     except Exception as e:
                         logging.error(
                             f"unable to create user '{source_user.username}', exception: {e}"
@@ -234,6 +238,7 @@ class UserSync:
         body = api.bindings.v1PostUserRequest(user=create_user, password=hashed_password, isHashed=True)
         if not self._dry_run:
             resp = api.bindings.post_PostUser(self._session, body=body)
+            return resp.user
         logging.info(f"created user '{user.username}': {create_user}")
 
     def _link_with_agent_user(self, user: SourceUser) -> None:
