@@ -52,6 +52,8 @@ class UserSync:
                 f"unable to fetch source groups, exception: \n{exc_str}{e}")
             return
 
+        total_users = sum([len(u) for u in source_groups_users.values()])
+        logging.info(f"found {len(source_groups_users)} groups with total users: {total_users}")
         logging.info("ended call to source groups func")
 
         # Get existing groups and users
