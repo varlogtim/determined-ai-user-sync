@@ -100,8 +100,8 @@ class UserSync:
                 # Create user if not exists
                 if source_user.username not in all_existing_users:
                     try:
-                        self._create_user(source_user)
-                        # all_existing_users[source_user.username] = source_user  # FIXME: please
+                        user = self._create_user(source_user)
+                        all_existing_users[source_user.username] = user
                     except Exception as e:
                         logging.error(
                             f"unable to create user '{source_user.username}', exception: {e}"
@@ -217,7 +217,7 @@ class UserSync:
             logging.info(f"found user '{user.username}' in group '{group_name}'")
         return ret
 
-    def _create_user(self, user: SourceUser) -> None:
+    def _create_user(self, user: SourceUser) -> v1User:
         remote = True
         hashed_password = None
         if user.password is not None and user.password != "":
@@ -233,7 +233,7 @@ class UserSync:
         )
         body = api.bindings.v1PostUserRequest(user=create_user, password=hashed_password, isHashed=True)
         if not self._dry_run:
-            api.bindings.post_PostUser(self._session, body=body)
+            resp = api.bindings.post_PostUser(self._session, body=body)
         logging.info(f"created user '{user.username}': {create_user}")
 
     def _link_with_agent_user(self, user: SourceUser) -> None:
