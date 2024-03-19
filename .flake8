@@ -5,15 +5,14 @@ max-line-length = 100
 exclude =
     .git,
     __pycache__,
-    build,
-    dist,
-    _gen.py,
-    tests/experiment/fixtures/ancient-checkpoints/
 
 # We ignore F401 in __init__.py because it is expected for there to be
 # "unused imports" when defining a "regular" package. (This file is
 # implicitly executed when the package is imported, and the imports would
 # be used by the importer.)
+per-file-ignores =
+  __init__.py:F401,I2041
+  det_user_sync/user_sync.py:F401,I2041
 
 # Explanations for ignored error codes:
 # - D1* (no missing docstrings): too much effort to start enforcing
@@ -45,3 +44,5 @@ import-order-style = edited
 # flake8-quotes
 inline-quotes = "
 multiline-quotes = """
+
+
