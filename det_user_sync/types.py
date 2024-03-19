@@ -4,7 +4,6 @@ from typing import Optional
 from determined.common import api
 
 
-
 @dataclasses.dataclass
 class SourceUser:
     username: str

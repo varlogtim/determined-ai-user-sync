@@ -1,17 +1,15 @@
 import argparse
 import logging
-import os
 import sys
 import time
-from typing import Callable, Optional
+from typing import Callable
 
-from det_user_sync import SourceGroups, SourceUser, UserSync
+import det_user_sync
+
+seconds_in_minute = 5
 
 
-seconds_in_minute = 60
-
-
-def err(msg: str):
+def err(msg: str) -> None:
     sys.stderr.write(f"ERROR: {msg}\n")
 
 
@@ -24,7 +22,7 @@ def configure_logging(dry_run: bool = True) -> None:
 
 
 def run(func: Callable, func_args: list, dry_run: bool, period_mins: int) -> None:
-    user_sync = UserSync(func, func_args, dry_run)
+    user_sync = det_user_sync.UserSync(func, func_args, dry_run)
 
     if period_mins < 1:
         logging.info("running once")
@@ -34,16 +32,16 @@ def run(func: Callable, func_args: list, dry_run: bool, period_mins: int) -> Non
     logging.info(f"running as service with period of {args.period_mins} minutes")
     while True:
         start_time = time.time()
-        logging.info(f"started user sync run")
+        logging.info("started user sync run")
 
         user_sync.sync_users()
 
-        logging.info(f"ended user sync run")
+        logging.info("ended user sync run")
         end_time = time.time()
 
         # XXX do we even need this?
         if end_time - start_time > seconds_in_minute * period_mins:
-            logging.warn(f"the script seems to be taking longer than the wait period?")
+            logging.warn("the script seems to be taking longer than the wait period?")
 
         time.sleep(seconds_in_minute * period_mins)
 
@@ -83,11 +81,11 @@ if __name__ == "__main__":
     try:
         module = __import__(module_name)
         func = getattr(module, func_name)
-    except ModuleNotFoundError as e:
+    except ModuleNotFoundError:
         arg_parser.print_help()
         err(f"Could not import module called '{module_name}'. See CSV example")
         sys.exit(1)
-    except AttributeError as e:
+    except AttributeError:
         arg_parser.print_help()
         err(f"Could not import function called '{func_name}'. See CSV example")
         sys.exit(1)

@@ -3,22 +3,22 @@ import logging
 import os
 import traceback
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional
 
 from determined import cli
 from determined.common import api
 from determined.experimental import client
 
-from .types import (SourceGroups, SourceUser, SourceUsers, v1GroupList,
-                    v1UsersMap)
+from .types import SourceGroups, SourceUser, SourceUsers, v1UsersMap
 
 # XXX cli.user_groups.group_name_to_group_id and usernames_to_user_ids has moved in recent version
+
 
 class UserSync:
     def __init__(
         self,
-        source_groups_func: Callable[[any], SourceGroups],
-        source_groups_func_args: Optional[list[any]],
+        source_groups_func: Callable[[Any], SourceGroups],
+        source_groups_func_args: Optional[list[Any]],
         dry_run: bool = True,
     ) -> None:
         self._session: api.Session = None
@@ -32,29 +32,27 @@ class UserSync:
             self._login()
 
         try:
-            self._whoami()
+            _ = self._whoami()
         except api.errors.UnauthenticatedException:
-            logging.info(f"session expired")
+            logging.info("session expired")
             self._login()
 
         # Get source groups and users
         logging.info("starting call to source groups func")
         # TODO: see if we can async and timeout call this function
         try:
-            if isinstance(self._source_groups_func_args, list):
-                source_groups_users = self._source_groups_func(
-                    *self._source_groups_func_args
-                )
-            else:
-                source_groups_users = self._source_groups_func()
+            source_groups_users = self._source_groups_func(
+                self._source_groups_func_args
+            )
         except Exception as e:
             exc_str = "".join(traceback.format_tb(e.__traceback__))
-            logging.error(
-                f"unable to fetch source groups, exception: \n{exc_str}{e}")
+            logging.error(f"unable to fetch source groups, exception: \n{exc_str}{e}")
             return
 
         total_users = sum([len(u) for u in source_groups_users.values()])
-        logging.info(f"found {len(source_groups_users)} groups with total users: {total_users}")
+        logging.info(
+            f"found {len(source_groups_users)} groups with total users: {total_users}"
+        )
         logging.info("ended call to source groups func")
 
         # Get existing groups and users
@@ -94,13 +92,12 @@ class UserSync:
                 logging.info(f"skipping source group '{source_group_name}'")
                 continue
 
-
-
             group_users_to_add: SourceUsers = []
 
             for source_user in source_users:
                 logging.info(
-                    f"started processing of source user {source_user} in group '{source_group_name}'"
+                    f"started processing of source user {source_user}"
+                    f"in group '{source_group_name}'"
                 )
                 # XXX create a __str__ method for source_user which masks the password
                 # Create user if not exists
@@ -123,7 +120,8 @@ class UserSync:
                             self._enable_users([source_user])
                         except Exception as e:
                             logging.error(
-                                f"unable to enable disabled user '{source_user.username}', exception: {e}"
+                                "unable to enable disabled user "
+                                f"'{source_user.username}', exception: {e}"
                             )
 
                 if source_user.username not in group_existing_users:
@@ -153,7 +151,6 @@ class UserSync:
                     group_users_to_remove[existing_username] = existing_user
             self._remove_users_from_usergroup(source_group_name, group_users_to_remove)
 
-
             # Disable users existing in this user-group that are not present in the full source
             # users list. This condition checks that they are not apart of any other user-group.
             # Since we are only disabling users who exist and are a part of a source user-group,
@@ -175,14 +172,15 @@ class UserSync:
                     f"userlist: {users_to_disable}, exception: {e}"
                 )
 
-            # XXX think about creating exceptions that break out of the loop and log differently here.
+            # XXX think about creating exceptions that break out of the loop
+            # and log differently here.
             # I.e., make it clear we processed a group but with errors.
             logging.info(f"finished processing group {source_group_name}")
         logging.info("finished processing all user groups")
 
-    def _whoami(self) -> None:
+    def _whoami(self) -> str:
         resp = api.bindings.get_GetMe(self._session)
-        return resp.user
+        return str(resp.user.username)
 
     def _login(self) -> None:
         user = os.environ.get("DET_USER", None)
@@ -222,7 +220,7 @@ class UserSync:
         logging.info(f"created user-group '{group_name}'")
 
     def _get_users_in_usergroup(self, group_name: str) -> v1UsersMap:
-        ret = {}
+        ret: v1UsersMap = {}
         if self._dry_run:
             return ret
         group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
@@ -247,7 +245,9 @@ class UserSync:
             remote=remote,
             displayName=user.display_name,
         )
-        body = api.bindings.v1PostUserRequest(user=create_user, password=hashed_password, isHashed=True)
+        body = api.bindings.v1PostUserRequest(
+            user=create_user, password=hashed_password, isHashed=True
+        )
         if not self._dry_run:
             resp = api.bindings.post_PostUser(self._session, body=body)
             return resp.user
@@ -285,12 +285,12 @@ class UserSync:
         if len(users) == 0:
             return
         group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
-        usernames = [u for u in users.keys()]
+        usernames = list(users.keys())
         user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
 
         body = api.bindings.v1UpdateGroupRequest(groupId=group_id, removeUsers=user_ids)
         if not self._dry_run:
-            resp = api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
+            api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
         logging.info(f"removed users from group '{group_name}', user list: {usernames}")
 
     def _disable_users(self, users: SourceUsers) -> None:
@@ -304,7 +304,7 @@ class UserSync:
                 )
                 logging.info(f"deactivated user '{username}'")
             return
-        for ii, username in enumerate(usernames):
+        for username in usernames:
             logging.info(f"deactivated user '{username}'")
 
     def _enable_users(self, users: SourceUsers) -> None:
