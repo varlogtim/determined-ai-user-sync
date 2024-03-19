@@ -12,6 +12,7 @@ from determined.experimental import client
 from .types import (SourceGroups, SourceUser, SourceUsers, v1GroupList,
                     v1UsersMap)
 
+# XXX cli.user_groups.group_name_to_group_id and usernames_to_user_ids has moved in recent version
 
 class UserSync:
     def __init__(
@@ -82,6 +83,7 @@ class UserSync:
                     continue
 
             try:
+                # XXX variable name doesn't match pattern, should be "existing_group_users"
                 group_existing_users: v1UsersMap = self._get_users_in_usergroup(
                     source_group_name
                 )
@@ -91,6 +93,8 @@ class UserSync:
                 )
                 logging.info(f"skipping source group '{source_group_name}'")
                 continue
+
+
 
             group_users_to_add: SourceUsers = []
 
@@ -141,6 +145,14 @@ class UserSync:
                     f"unable to add users to user-group '{source_group_name}', "
                     f"userlist: {group_users_to_add}, exception: {e}"
                 )
+
+            # Remove users from group
+            group_users_to_remove: v1UsersMap = {}
+            for existing_username, existing_user in group_existing_users.items():
+                if existing_username not in [su.username for su in source_users]:
+                    group_users_to_remove[existing_username] = existing_user
+            self._remove_users_from_usergroup(source_group_name, group_users_to_remove)
+
 
             # Disable users existing in this user-group that are not present in the full source
             # users list. This condition checks that they are not apart of any other user-group.
@@ -268,6 +280,18 @@ class UserSync:
             )
             api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
         logging.info(f"added users to group '{group_name}', user list: {usernames}")
+
+    def _remove_users_from_usergroup(self, group_name: str, users: v1UsersMap) -> None:
+        if len(users) == 0:
+            return
+        group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
+        usernames = [u for u in users.keys()]
+        user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
+
+        body = api.bindings.v1UpdateGroupRequest(groupId=group_id, removeUsers=user_ids)
+        if not self._dry_run:
+            resp = api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
+        logging.info(f"removed users from group '{group_name}', user list: {usernames}")
 
     def _disable_users(self, users: SourceUsers) -> None:
         usernames = [u.username for u in users]
