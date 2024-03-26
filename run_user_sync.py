@@ -6,7 +6,7 @@ from typing import Callable
 
 import det_user_sync
 
-seconds_in_minute = 5
+seconds_in_minute = 60
 
 
 def err(msg: str) -> None:
