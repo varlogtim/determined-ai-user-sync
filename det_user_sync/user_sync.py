@@ -190,7 +190,8 @@ class UserSync:
             raise ValueError(
                 "You must set DET_MASTER, DET_USER and DET_PASSWORD before executing this script"
             )
-        det = client.Determined(master, user, password)
+        noverify = True
+        det = client.Determined(master, user, password, None, None, noverify)
         logging.info(f"logged in as user '{user}' to {master}")
         self._session = det._session
 
