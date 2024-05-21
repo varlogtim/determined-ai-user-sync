@@ -195,6 +195,21 @@ class UserSync:
         logging.info(f"logged in as user '{user}' to {master}")
         self._session = det._session
 
+    # XXX Wrappers for legacy function locations
+    def _group_name_to_group_id(self, group_name: str) -> int:
+        try:
+            # XXX Legacy
+            return cli.user_groups.group_name_to_group_id(self._session, group_name)
+        except AttributeError:
+            return api.group_name_to_group_id(self._session, group_name)
+
+    def _usernames_to_user_ids(self, usernames: list[str]) -> list[int]:
+        try:
+            # XXX legacy
+            return cli.user_groups.usernames_to_user_ids(self._session, usernames)
+        except AttributeError:
+            return api.usernames_to_user_ids(self._session, usernames)
+
     def _get_user_groups(self) -> list[str]:
         # XXX raises determined.common.api.errors.BadRequestException if group does not exist
         # XXX Need to handle condition in which response is equal to limit, i.e., is incomplete.
@@ -224,7 +239,8 @@ class UserSync:
         ret: v1UsersMap = {}
         if self._dry_run:
             return ret
-        group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
+        group_id = self._group_name_to_group_id(group_name)
+
         resp = api.bindings.get_GetGroup(self._session, groupId=group_id)
         logging.info(f"retrieved user-group details: {resp.group}")
         for user in resp.group.users:
@@ -263,9 +279,7 @@ class UserSync:
         )
         if not self._dry_run:
             body = api.bindings.v1PatchUser(agentUserGroup=v1agent_user_group)
-            user_ids = cli.user_groups.usernames_to_user_ids(
-                self._session, [user.username]
-            )
+            user_ids = self._usernames_to_user_ids([user.username])
             api.bindings.patch_PatchUser(self._session, body=body, userId=user_ids[0])
         logging.info(
             f"linked user '{user.username}' with agent user {v1agent_user_group}"
@@ -274,8 +288,8 @@ class UserSync:
     def _add_users_to_usergroup(self, group_name: str, users: SourceUsers) -> None:
         usernames = [u.username for u in users]
         if not self._dry_run:
-            group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
-            user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
+            group_id = self._group_name_to_group_id(group_name)
+            user_ids = self._usernames_to_user_ids(usernames)
             body = api.bindings.v1UpdateGroupRequest(
                 groupId=group_id, addUsers=user_ids
             )
@@ -285,9 +299,9 @@ class UserSync:
     def _remove_users_from_usergroup(self, group_name: str, users: v1UsersMap) -> None:
         if len(users) == 0:
             return
-        group_id = cli.user_groups.group_name_to_group_id(self._session, group_name)
+        group_id = self._group_name_to_group_id(group_name)
         usernames = list(users.keys())
-        user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
+        user_ids = self._usernames_to_user_ids(usernames)
 
         body = api.bindings.v1UpdateGroupRequest(groupId=group_id, removeUsers=user_ids)
         if not self._dry_run:
@@ -297,7 +311,7 @@ class UserSync:
     def _disable_users(self, users: SourceUsers) -> None:
         usernames = [u.username for u in users]
         if not self._dry_run:
-            user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
+            user_ids = self._usernames_to_user_ids(usernames)
             body = api.bindings.v1PatchUser(active=False)
             for ii, username in enumerate(usernames):
                 api.bindings.patch_PatchUser(
@@ -311,7 +325,7 @@ class UserSync:
     def _enable_users(self, users: SourceUsers) -> None:
         usernames = [u.username for u in users]
         if not self._dry_run:
-            user_ids = cli.user_groups.usernames_to_user_ids(self._session, usernames)
+            user_ids = self._usernames_to_user_ids(usernames)
             body = api.bindings.v1PatchUser(active=True)
             for ii, username in enumerate(usernames):
                 api.bindings.patch_PatchUser(
