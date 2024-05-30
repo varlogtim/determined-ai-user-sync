@@ -215,8 +215,9 @@ class UserSync:
         # XXX Need to handle condition in which response is equal to limit, i.e., is incomplete.
         limit = 500
         body = api.bindings.v1GetGroupsRequest(limit=limit, offset=None, userId=None)
-        if self._dry_run:
-            return []
+        # XXX Need to actually run if dry run
+        # if self._dry_run:
+        #     return []
         resp = api.bindings.post_GetGroups(self._session, body=body)
         for group_res in resp.groups:
             logging.info(
@@ -237,8 +238,9 @@ class UserSync:
 
     def _get_users_in_usergroup(self, group_name: str) -> v1UsersMap:
         ret: v1UsersMap = {}
-        if self._dry_run:
-            return ret
+        # XXX Need to actually return if dry run.
+        # if self._dry_run:
+        #     return ret
         group_id = self._group_name_to_group_id(group_name)
 
         resp = api.bindings.get_GetGroup(self._session, groupId=group_id)
