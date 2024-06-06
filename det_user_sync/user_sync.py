@@ -308,7 +308,7 @@ class UserSync:
         body = api.bindings.v1UpdateGroupRequest(groupId=group_id, removeUsers=user_ids)
         if not self._dry_run:
             api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
-        logging.info(f"removed users from group '{group_name}', user list: {usernames}")
+        logging.info(f"removed {len(usernames)} users from group '{group_name}', user list: {usernames}")
 
     def _disable_users(self, users: SourceUsers) -> None:
         usernames = [u.username for u in users]
@@ -320,9 +320,11 @@ class UserSync:
                     self._session, body=body, userId=user_ids[ii]
                 )
                 logging.info(f"deactivated user '{username}'")
+            logging.info(f"deactived a total of {len(usernames)} users")
             return
         for username in usernames:
             logging.info(f"deactivated user '{username}'")
+        logging.info(f"deactived a total of {len(usernames)} users")
 
     def _enable_users(self, users: SourceUsers) -> None:
         usernames = [u.username for u in users]
