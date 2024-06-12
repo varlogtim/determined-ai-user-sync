@@ -91,6 +91,12 @@ class UserSyncReport:
             })
 
         self._report_items.append({
+            "action": "enabled_users",
+            "usercount": len(self._enabled_users),
+            "usernames": self._enabled_users
+        })
+
+        self._report_items.append({
             "action": "disabled_users",
             "usercount": len(self._disabled_users),
             "usernames": self._disabled_users
@@ -101,6 +107,7 @@ class UserSyncReport:
             "total_users_created": len(self._created_users),
             "total_users_added_to_groups": len(tuple(u for u in self._added_group_users.values())),
             "total_users_removed_from_groups": len(tuple(u for u in self._removed_group_users.values())),
+            "total_users_enabled": len(self._enabled_users),
             "total_users_disabled": len(self._disabled_users),
         })
 
