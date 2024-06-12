@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import dataclasses
 import logging
 import os
+import json
 import traceback
 from collections.abc import Callable
 from typing import Any, Optional
@@ -11,8 +13,96 @@ from determined.experimental import client
 
 from .types import SourceGroups, SourceUser, SourceUsers, v1UsersMap
 
-# XXX cli.user_groups.group_name_to_group_id and usernames_to_user_ids has moved in recent version
 
+# XXX Need to test try/catch/finally report generation from random in middle of execution.
+
+
+class UserSyncReport:
+    def __init__(self) -> None:
+        NameList = list[str]
+        self._created_groups: NameList = []
+        self._created_users: NameList = []
+        self._enabled_users: NameList = []
+        self._added_group_users: dict[str, NameList] = {}
+        self._removed_group_users: dict[str, NameList] = {}
+        self._disabled_users: NameList = []
+        self._report_items: list[dict[str, Any]] = []
+
+    def created_group(self, groupname: str) -> None:
+        self._created_groups.append(groupname)
+
+    def created_user(self, username: str) -> None:
+        self._created_users.append(username)
+
+    def enabled_user(self, username: str) -> None:
+        self._enabled_users.append(username)
+
+    def removed_group_user(self, groupname: str, username: str) -> None:
+        if not self._removed_group_users.get(groupname):
+            self._removed_group_users[groupname] = []    
+        self._removed_group_users[groupname].append(username)
+
+    def added_group_user(self, groupname: str, username: str) -> None:
+        if not self._added_group_users.get(groupname):
+            self._added_group_users[groupname] = []    
+        self._added_group_users[groupname].append(username)
+
+    def disabled_user(self, username: str) -> None:
+        self._disable_users.append(username)
+
+    def __repr__(self) -> str:
+        self._hydrate_report_items()
+        return "\n".join(str(r) for r in self._report_items)
+
+    def log(self) -> None:
+        self._hydrate_report_items()
+        for item in self._report_items:
+            logging.info("REPORT: {}".format(
+                ", ".join(f"{k}={v}" for k, v in item.items())
+            ))
+
+    def to_json(self) -> str:
+        self._hydrate_report_items()
+        return json.dumps(self._report_items)
+
+    def _hydrate_report_items(self) -> None:
+        self._report_items = []
+        
+        self._report_items.append({
+            "action": "created_users",
+            "usercount": len(self._created_users),
+            "usernames": self._created_users
+        })
+
+        for groupname, usernames in self._added_group_users.items():
+            self._report_items.append({
+                "action": "added_users_to_group",
+                "groupname": groupname,
+                "usercount": len(usernames),
+                "usernames": usernames
+            })
+
+        for groupname, usernames in self._removed_group_users.items():
+            self._report_items.append({
+                "action": "removed_users_from_group",
+                "groupname": groupname,
+                "usercount": len(usernames),
+                "usernames": usernames
+            })
+
+        self._report_items.append({
+            "action": "disabled_users",
+            "usercount": len(self._disabled_users),
+            "usernames": self._disabled_users
+        })
+
+        self._report_items.append({
+            "action": "summary",
+            "total_users_created": len(self._created_users),
+            "total_users_added_to_groups": len(tuple(u for u in self._added_group_users.values())),
+            "total_users_removed_from_groups": len(tuple(u for u in self._removed_group_users.values())),
+            "total_users_disabled": len(self._disabled_users),
+        })
 
 class UserSync:
     def __init__(
@@ -20,11 +110,12 @@ class UserSync:
         source_groups_func: Callable[[Any], SourceGroups],
         source_groups_func_args: Optional[list[Any]],
         dry_run: bool = True,
-    ) -> None:
+    ) -> UserSyncReport:
         self._session: api.Session = None
         self._dry_run = dry_run
         self._source_groups_func = source_groups_func
         self._source_groups_func_args = source_groups_func_args
+        self._report = UserSyncReport()
 
     def sync_users(self) -> None:
         # Make sure we have an active session
@@ -81,10 +172,10 @@ class UserSync:
                     continue
 
             try:
-                # XXX variable name doesn't match pattern, should be "existing_group_users"
-                group_existing_users: v1UsersMap = self._get_users_in_usergroup(
+                existing_group_users: v1UsersMap = self._get_users_in_usergroup(
                     source_group_name
                 )
+                
             except Exception as e:
                 logging.error(
                     f"unable to get group members '{source_group_name}', exception: {e}"
@@ -99,12 +190,13 @@ class UserSync:
                     f"started processing of source user {source_user}"
                     f"in group '{source_group_name}'"
                 )
-                # XXX create a __str__ method for source_user which masks the password
+                # XXX create a __repr__ method for source_user which masks the password
                 # Create user if not exists
                 if source_user.username not in all_existing_users:
                     try:
+                        # XXX I think it is fine if we don't update all_existing_users on dryrun
+                        # because we only use this to determine if the user is active or not.
                         user = self._create_user(source_user)
-                        # Happens if dry run
                         if user is not None:
                             all_existing_users[source_user.username] = user
                     except Exception as e:
@@ -124,7 +216,7 @@ class UserSync:
                                 f"'{source_user.username}', exception: {e}"
                             )
 
-                if source_user.username not in group_existing_users:
+                if source_user.username not in existing_group_users:
                     group_users_to_add.append(source_user)
 
                 # Link with agent user
@@ -146,7 +238,7 @@ class UserSync:
 
             # Remove users from group
             group_users_to_remove: v1UsersMap = {}
-            for existing_username, existing_user in group_existing_users.items():
+            for existing_username, existing_user in existing_group_users.items():
                 if existing_username not in [su.username for su in source_users]:
                     group_users_to_remove[existing_username] = existing_user
             self._remove_users_from_usergroup(source_group_name, group_users_to_remove)
@@ -157,7 +249,7 @@ class UserSync:
             # we will not affect other existing users who are not a member of the source user-group.
             # In other words, we should skip all manually created accounts.
             users_to_disable = []
-            for user in group_existing_users.values():
+            for user in existing_group_users.values():
                 if (
                     user.username not in all_source_usernames
                     and user.username != "admin"
@@ -177,6 +269,8 @@ class UserSync:
             # I.e., make it clear we processed a group but with errors.
             logging.info(f"finished processing group {source_group_name}")
         logging.info("finished processing all user groups")
+
+        return self._report
 
     def _whoami(self) -> str:
         resp = api.bindings.get_GetMe(self._session)
@@ -215,9 +309,6 @@ class UserSync:
         # XXX Need to handle condition in which response is equal to limit, i.e., is incomplete.
         limit = 500
         body = api.bindings.v1GetGroupsRequest(limit=limit, offset=None, userId=None)
-        # XXX Need to actually run if dry run
-        # if self._dry_run:
-        #     return []
         resp = api.bindings.post_GetGroups(self._session, body=body)
         for group_res in resp.groups:
             logging.info(
@@ -234,16 +325,22 @@ class UserSync:
         body = api.bindings.v1CreateGroupRequest(name=group_name, addUsers=None)
         if not self._dry_run:
             api.bindings.post_CreateGroup(self._session, body=body)
+        self._report.created_group(group_name)
         logging.info(f"created user-group '{group_name}'")
 
     def _get_users_in_usergroup(self, group_name: str) -> v1UsersMap:
         ret: v1UsersMap = {}
-        # XXX Need to actually return if dry run.
-        # if self._dry_run:
-        #     return ret
-        group_id = self._group_name_to_group_id(group_name)
+        try:
+            group_id = self._group_name_to_group_id(group_name)
+        except api.errors.BadRequestException:
+            # BadRequestException: 'could not find user group name ...'
+            if self._dry_run:
+                # Occurs when it is a dry run and so we didn't create the group.
+                return ret
+            raise
 
         resp = api.bindings.get_GetGroup(self._session, groupId=group_id)
+
         logging.info(f"retrieved user-group details: {resp.group}")
         for user in resp.group.users:
             ret[user.username] = user
@@ -268,8 +365,11 @@ class UserSync:
             user=create_user, password=hashed_password, isHashed=True
         )
         if not self._dry_run:
+            self._report.created_user(source_user)
+            logging.info(f"created user '{user.username}': {create_user}")
             resp = api.bindings.post_PostUser(self._session, body=body)
             return resp.user
+        self._report.created_user(user.username)
         logging.info(f"created user '{user.username}': {create_user}")
 
     def _link_with_agent_user(self, user: SourceUser) -> None:
@@ -296,21 +396,29 @@ class UserSync:
                 groupId=group_id, addUsers=user_ids
             )
             api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
+        for username in usernames:
+            self._report.added_group_user(group_name, username)
         logging.info(f"added users to group '{group_name}', user list: {usernames}")
 
     def _remove_users_from_usergroup(self, group_name: str, users: v1UsersMap) -> None:
+        # XXX This needs to be in a try / catch / finally
+        # I need to append to a list of disabled users as we disable them.
         if len(users) == 0:
             return
         group_id = self._group_name_to_group_id(group_name)
-        usernames = list(users.keys())
         user_ids = self._usernames_to_user_ids(usernames)
+        usernames = list(users.keys())
 
         body = api.bindings.v1UpdateGroupRequest(groupId=group_id, removeUsers=user_ids)
         if not self._dry_run:
             api.bindings.put_UpdateGroup(self._session, groupId=group_id, body=body)
+        for username in usernames:
+            self._report.removed_group_user(group_name, username)
         logging.info(f"removed {len(usernames)} users from group '{group_name}', user list: {usernames}")
 
     def _disable_users(self, users: SourceUsers) -> None:
+        # XXX This needs to be in a try / catch / finally
+        # I need to append to a list of disabled users as we disable them.
         usernames = [u.username for u in users]
         if not self._dry_run:
             user_ids = self._usernames_to_user_ids(usernames)
@@ -320,10 +428,12 @@ class UserSync:
                     self._session, body=body, userId=user_ids[ii]
                 )
                 logging.info(f"deactivated user '{username}'")
+                self._report.disabled_user(username)
             logging.info(f"deactived a total of {len(usernames)} users")
             return
         for username in usernames:
             logging.info(f"deactivated user '{username}'")
+            self._report.disabled_user(username)
         logging.info(f"deactived a total of {len(usernames)} users")
 
     def _enable_users(self, users: SourceUsers) -> None:
@@ -335,7 +445,9 @@ class UserSync:
                 api.bindings.patch_PatchUser(
                     self._session, body=body, userId=user_ids[ii]
                 )
+                self._report.enabled_user(username)
                 logging.info(f"activated user '{username}'")
             return
         for username in usernames:
+            self._report.enabled_user(username)
             logging.info(f"activated user '{username}'")
