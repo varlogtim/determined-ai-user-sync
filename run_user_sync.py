@@ -44,11 +44,15 @@ def run(func: Callable, func_args: list, dry_run: bool, period_mins: int) -> Non
     logging.info(f"running as service with period of {args.period_mins} minutes")
     while True:
         start_time = time.time()
-        logging.info("started user sync run")
 
-        report = user_sync.sync_users()
+        try:
+            logging.info("started user sync run")
+            report = user_sync.sync_users()
+            logging.info("ended user sync run")
+        finally:
+            if report is not None:
+                report.log()
 
-        logging.info("ended user sync run")
         end_time = time.time()
 
         # XXX do we even need this?
