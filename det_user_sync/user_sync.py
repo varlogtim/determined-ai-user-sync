@@ -365,7 +365,7 @@ class UserSync:
             user=create_user, password=hashed_password, isHashed=True
         )
         if not self._dry_run:
-            self._report.created_user(source_user)
+            self._report.created_user(user.username)
             logging.info(f"created user '{user.username}': {create_user}")
             resp = api.bindings.post_PostUser(self._session, body=body)
             return resp.user
