@@ -20,13 +20,25 @@ def configure_logging(dry_run: bool = True) -> None:
 
     logging.basicConfig(format=logging_format, level=logging.INFO)
 
+# XXX Test cases:
+# Create user
+# Enable user
+# Deactive user
+# add user to group
+# remove user from group
+
 
 def run(func: Callable, func_args: list, dry_run: bool, period_mins: int) -> None:
     user_sync = det_user_sync.UserSync(func, func_args, dry_run)
 
     if period_mins < 1:
         logging.info("running once")
-        user_sync.sync_users()
+        report = None
+        try:
+            report = user_sync.sync_users()
+        finally:
+            if report is not None:
+                report.log()
         return
 
     logging.info(f"running as service with period of {args.period_mins} minutes")
@@ -34,7 +46,7 @@ def run(func: Callable, func_args: list, dry_run: bool, period_mins: int) -> Non
         start_time = time.time()
         logging.info("started user sync run")
 
-        user_sync.sync_users()
+        report = user_sync.sync_users()
 
         logging.info("ended user sync run")
         end_time = time.time()
