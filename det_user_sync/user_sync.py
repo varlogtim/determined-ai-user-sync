@@ -48,7 +48,7 @@ class UserSyncReport:
         self._added_group_users[groupname].append(username)
 
     def disabled_user(self, username: str) -> None:
-        self._disable_users.append(username)
+        self._disabled_users.append(username)
 
     def __repr__(self) -> str:
         self._hydrate_report_items()
