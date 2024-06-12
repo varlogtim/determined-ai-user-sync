@@ -405,9 +405,9 @@ class UserSync:
         # I need to append to a list of disabled users as we disable them.
         if len(users) == 0:
             return
+        usernames = list(users.keys())
         group_id = self._group_name_to_group_id(group_name)
         user_ids = self._usernames_to_user_ids(usernames)
-        usernames = list(users.keys())
 
         body = api.bindings.v1UpdateGroupRequest(groupId=group_id, removeUsers=user_ids)
         if not self._dry_run:
