@@ -45,6 +45,7 @@ def run(func: Callable, func_args: list, dry_run: bool, period_mins: int) -> Non
     while True:
         start_time = time.time()
 
+        report = None
         try:
             logging.info("started user sync run")
             report = user_sync.sync_users()
