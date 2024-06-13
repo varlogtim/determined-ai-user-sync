@@ -1,0 +1,18 @@
+[Unit]
+Description=det-user-sync
+Documentation=https://github.com/varlogtim/determined-ai-user-sync
+
+[Service]
+EnvironmentFile=/root/det_user_sync/determined-ai-user-sync/environment.sh
+ExecStart=/root/det_user_sync/venv/bin/python \
+    /root/det_user_sync/determined-ai-user-sync/run_user_sync.py \
+    --source-func csv_user_example:parse_userlist_csv \
+    --func-args \
+    /root/det_user_sync/determined-ai-user-sync/user_group_list.csv \
+    --period-mins 30 \
+    --apply
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
