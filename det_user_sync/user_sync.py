@@ -14,9 +14,6 @@ from determined.experimental import client
 from .types import SourceGroups, SourceUser, SourceUsers, v1UsersMap
 
 
-# XXX Need to test try/catch/finally report generation from random in middle of execution.
-
-
 class UserSyncReport:
     def __init__(self) -> None:
         NameList = list[str]
@@ -27,6 +24,10 @@ class UserSyncReport:
         self._removed_group_users: dict[str, NameList] = {}
         self._disabled_users: NameList = []
         self._report_items: list[dict[str, Any]] = []
+
+    def __repr__(self) -> str:
+        self._hydrate_report_items()
+        return "\n".join(str(r) for r in self._report_items)
 
     def created_group(self, groupname: str) -> None:
         self._created_groups.append(groupname)
@@ -50,9 +51,6 @@ class UserSyncReport:
     def disabled_user(self, username: str) -> None:
         self._disabled_users.append(username)
 
-    def __repr__(self) -> str:
-        self._hydrate_report_items()
-        return "\n".join(str(r) for r in self._report_items)
 
     def log(self) -> None:
         self._hydrate_report_items()
@@ -122,9 +120,11 @@ class UserSync:
         self._dry_run = dry_run
         self._source_groups_func = source_groups_func
         self._source_groups_func_args = source_groups_func_args
-        self._report = UserSyncReport()
+        self._report = None
 
     def sync_users(self) -> None:
+        self._report = UserSyncReport()
+
         # Make sure we have an active session
         if self._session is None:
             self._login()
