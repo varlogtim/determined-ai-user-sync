@@ -72,6 +72,12 @@ class UserSyncReport:
             "usernames": self._created_users
         })
 
+        self._report_items.append({
+            "action": "created_groups",
+            "groupcount": len(self._created_groups),
+            "groupnames": self._created_groups
+        })
+
         for groupname, usernames in self._added_group_users.items():
             self._report_items.append({
                 "action": "added_users_to_group",
@@ -102,6 +108,7 @@ class UserSyncReport:
 
         self._report_items.append({
             "action": "summary",
+            "total_groups_created": len(self._created_groups),
             "total_users_created": len(self._created_users),
             "total_users_added_to_groups": len(tuple(u for u in self._added_group_users.values())),
             "total_users_removed_from_groups": len(tuple(u for u in self._removed_group_users.values())),
